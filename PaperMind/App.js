@@ -1,111 +1,186 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, SafeAreaView, Alert, TextInput } from 'react-native';
-import Canvas from './components/Canvas';
-import { saveMap, loadMap, exportMapText, importMapText } from './storage';
+import React, { useState, useEffect } from "react";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  TextInput,
+  StyleSheet,
+  Alert,
+} from "react-native";
+import Svg, { Line, Circle, Text as SvgText } from "react-native-svg";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const initialNode = { id: 1, label: "PaperMind", x: 200, y: 200 };
+const initialLink = [];
 
 export default function App() {
-  const [mapData, setMapData] = useState(null);
-  const [editingName, setEditingName] = useState('My PaperMind');
-  const canvasRef = useRef();
+  const [nodes, setNodes] = useState([initialNode]);
+  const [links, setLinks] = useState(initialLink);
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [mapName, setMapName] = useState("My PaperMind");
 
   useEffect(() => {
-    (async () => {
-      const saved = await loadMap();
-      if (saved) setMapData(saved);
-      else {
-        // initial map skeleton
-        setMapData({
-          name: 'PaperMind root',
-          nodes: {
-            'n1': { id: 'n1', x: 150, y: 200, text: 'PaperMind' }
-          },
-          edges: []
-        });
-      }
-    })();
+    loadMindMap();
   }, []);
 
-  const handleSave = async () => {
-    await saveMap(mapData);
-    Alert.alert('Saved', 'Map saved locally.');
+  const addNode = () => {
+    const newNode = {
+      id: Date.now(),
+      label: "New Idea",
+      x: 150 + Math.random() * 200,
+      y: 150 + Math.random() * 200,
+    };
+    setNodes([...nodes, newNode]);
   };
 
-  const handleExport = async () => {
-    const text = await exportMapText(mapData);
-    // show export text so user can copy
-    Alert.alert('Export JSON', text.slice(0, 200) + (text.length>200 ? '…' : ''));
+  const selectNode = (nodeId) => {
+    if (selectedNode && selectedNode !== nodeId) {
+      setLinks([...links, { from: selectedNode, to: nodeId }]);
+      setSelectedNode(null);
+    } else {
+      setSelectedNode(nodeId);
+    }
   };
 
-  const handleImport = async () => {
-    Alert.prompt(
-      'Import JSON',
-      'Paste JSON of a map to import',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Import', onPress: async (value) => {
-            try {
-              const imported = await importMapText(value);
-              setMapData(imported);
-              Alert.alert('Imported');
-            } catch (e) {
-              Alert.alert('Error', 'Invalid JSON');
-            }
-          }
-        }
-      ],
-      'plain-text'
-    );
+  const saveMindMap = async () => {
+    try {
+      const data = JSON.stringify({ nodes, links, mapName });
+      await AsyncStorage.setItem("PaperMindData", data);
+      Alert.alert("Saved!", "Your mind map has been saved successfully.");
+    } catch (error) {
+      console.error("Save error:", error);
+    }
   };
 
-  if (!mapData) {
-    return <View style={styles.center}><Text>Loading…</Text></View>;
-  }
+  const loadMindMap = async () => {
+    try {
+      const saved = await AsyncStorage.getItem("PaperMindData");
+      if (saved) {
+        const { nodes, links, mapName } = JSON.parse(saved);
+        setNodes(nodes);
+        setLinks(links);
+        setMapName(mapName);
+      }
+    } catch (error) {
+      console.error("Load error:", error);
+    }
+  };
+
+  const clearSelection = () => setSelectedNode(null);
+
+  const deleteNode = (nodeId) => {
+    setNodes(nodes.filter((n) => n.id !== nodeId));
+    setLinks(links.filter((l) => l.from !== nodeId && l.to !== nodeId));
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>{editingName}</Text>
-        <View style={styles.controls}>
-          <TouchableOpacity style={styles.btn} onPress={() => canvasRef.current?.addNode()}>
-            <Text>Add Node</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.btn} onPress={() => canvasRef.current?.clearSelection()}>
-            <Text>Clear Sel</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.btn} onPress={handleSave}>
-            <Text>Save</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.btn} onPress={handleExport}>
-            <Text>Export</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.btn} onPress={handleImport}>
-            <Text>Import</Text>
-          </TouchableOpacity>
-        </View>
+    <View style={styles.container}>
+      <Text style={styles.header}>{mapName}</Text>
+
+      <Svg height="80%" width="100%">
+        {links.map((l, idx) => {
+          const from = nodes.find((n) => n.id === l.from);
+          const to = nodes.find((n) => n.id === l.to);
+          if (!from || !to) return null;
+          return (
+            <Line
+              key={idx}
+              x1={from.x}
+              y1={from.y}
+              x2={to.x}
+              y2={to.y}
+              stroke="gray"
+              strokeWidth="2"
+            />
+          );
+        })}
+
+        {nodes.map((n) => (
+          <React.Fragment key={n.id}>
+            <Circle
+              cx={n.x}
+              cy={n.y}
+              r="30"
+              fill={selectedNode === n.id ? "#88f" : "#ddd"}
+              stroke="#333"
+              strokeWidth="2"
+              onPress={() => selectNode(n.id)}
+              onLongPress={() => deleteNode(n.id)}
+            />
+            <SvgText
+              x={n.x}
+              y={n.y + 5}
+              fontSize="10"
+              textAnchor="middle"
+              fill="#000"
+            >
+              {n.label}
+            </SvgText>
+          </React.Fragment>
+        ))}
+      </Svg>
+
+      <View style={styles.controls}>
+        <TouchableOpacity onPress={addNode} style={styles.button}>
+          <Text style={styles.buttonText}>Add Node</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={clearSelection} style={styles.button}>
+          <Text style={styles.buttonText}>Clear Sel</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={saveMindMap} style={styles.button}>
+          <Text style={styles.buttonText}>Save</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={loadMindMap} style={styles.button}>
+          <Text style={styles.buttonText}>Load</Text>
+        </TouchableOpacity>
       </View>
 
-      <Canvas ref={canvasRef} map={mapData} onChange={setMapData} style={styles.canvas} />
-
-      <View style={styles.footer}>
-        <TextInput
-          style={styles.input}
-          value={editingName}
-          onChangeText={setEditingName}
-          placeholder="Map name"
-        />
-      </View>
-    </SafeAreaView>
+      <TextInput
+        style={styles.input}
+        value={mapName}
+        onChangeText={setMapName}
+        placeholder="Mind map name"
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f6f6f8' },
-  header: { padding: 8, backgroundColor: '#fff', borderBottomWidth: 1, borderColor: '#eee' },
-  title: { fontSize: 18, fontWeight: '600' },
-  controls: { flexDirection: 'row', marginTop: 8, gap: 8 },
-  btn: { padding: 8, backgroundColor: '#eee', borderRadius: 8, marginRight: 8 },
-  canvas: { flex: 1 },
-  footer: { padding: 8, backgroundColor: '#fff', borderTopWidth: 1, borderColor: '#eee' },
-  input: { height: 40, borderWidth: 1, borderColor: '#ddd', borderRadius: 6, padding: 8 }
+  container: {
+    flex: 1,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  header: {
+    fontSize: 22,
+    fontWeight: "bold",
+    marginTop: 40,
+    marginBottom: 10,
+  },
+  controls: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    width: "100%",
+    marginVertical: 10,
+  },
+  button: {
+    backgroundColor: "#4682b4",
+    padding: 8,
+    borderRadius: 8,
+  },
+  buttonText: {
+    color: "#fff",
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 8,
+    padding: 5,
+    marginBottom: 10,
+    width: "90%",
+  },
 });
